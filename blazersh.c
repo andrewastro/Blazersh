@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #define MAXCHAR 1000    //max number of supported characters in command
 #define MAXTOK 100      //max number of tokens in command
@@ -83,11 +84,21 @@ void detectIORedirect(char** tokenizedCommand, char** filenames) {
     }
 }
 
+//close files used for IO redirection
+void closeIO(int isInputRed, int isOutputRed, int fdin, int fdout) {
+    if (isInputRed == 1) {
+        close(fdin);
+    }
+    if (isOutputRed == 1) {
+        close(fdout);
+    }
+}
+
 // executes command
 // first looks for internal commands
 void executeCommand(char** tokenizedCommand, char** filenames) {
     char* internalCommands[6];
-    int internalCommand = 0, i = 0, pid = 0;
+    int internalCommand, i, pid, fdin, fdout, isInputRed = 0, isOutputRed = 0;
     char cwd[MAXPATH], arg[MAXPATH+4];
 
     internalCommands[0] = "environ";
@@ -97,6 +108,7 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
     internalCommands[4] = "help";
     internalCommands[5] = "quit";
     
+    //look for internal commands
     for (i = 0; i < 6; i++) {
         if (strcmp(tokenizedCommand[0], internalCommands[i]) == 0) {
             internalCommand = i + 1;
@@ -104,14 +116,36 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
         }
     }
 
+    //open input file
+    if (filenames[0] != NULL) {
+        if ((fdin = open(filenames[0], O_RDONLY, 0666)) == -1) {
+            printf("error opening file %s for input\n\r", filenames[0]);
+	    return;
+	} else {
+	    isInputRed = 1;
+	}
+    }
+    //open output file
+    if (filenames[1] != NULL) {
+	if ((fdout = open(filenames[1], O_CREAT | O_WRONLY | O_TRUNC, 0666)) == -1) {
+	     printf("error opening file %s for output\n\r", filenames[1]);
+	     return;
+	} else {
+	    isOutputRed = 1;
+	}
+    }
+
     switch(internalCommand) {
         case 1 :    //environ
             pid = fork();
 	    if (pid == 0) {
+		if (isInputRed == 1) { dup2(fdin, 0); }
+		if (isOutputRed == 1) { dup2(fdout, 1); }
 	        execvp("printenv", tokenizedCommand);
 		exit(0);
 	    } else if (pid > 0) {
 	        wait(NULL);
+		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
             }
 	    break;
@@ -119,22 +153,28 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
             if (tokenizedCommand[2] == NULL) {
 	        printf("two arguments expected");
 	    } else {
+		if (isInputRed == 1) { dup2(fdin, 0); }
+		if (isOutputRed == 1) { dup2(fdout, 1); }
 	        strcpy(arg, tokenizedCommand[1]);
 		strcat(arg, "=");
 		strcat(arg, tokenizedCommand[2]);
                 if(putenv(arg) != 0) {
 		    printf("set failed");
 		}
+		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    }
             break;
         case 3 :    //list
             pid = fork();
 	    if (pid == 0) {
-	        execvp("ls", tokenizedCommand);
+                if (isInputRed == 1) { dup2(fdin, 0); }
+		if (isOutputRed == 1) { dup2(fdout, 1); }
+		execvp("ls", tokenizedCommand);
 		printf("list failed\n\r");
 		exit(0);
 	    } else if (pid > 0) {
                 wait(NULL);
+		closeIO(isInputRed, isOutputRed, fdin, fdout);
             } else {
 	    }
 	    break;
@@ -145,30 +185,39 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
                 if(chdir(tokenizedCommand[1]) != 0) {
 	            printf("cd failed: check path\n\r");
 		} else {
+                    if (isInputRed == 1) { dup2(fdin, 0); }
+                    if (isOutputRed == 1) { dup2(fdout, 1); }
 	            strcpy(arg, "PWD=");
 		    strcat(arg, getcwd(cwd, sizeof(cwd)));
 	            putenv(arg);
+		    closeIO(isInputRed, isOutputRed, fdin, fdout);
 		}
 	    }
 	    break;
         case 5 :    //help
+            if (isInputRed == 1) { dup2(fdin, 0); }
+            if (isOutputRed == 1) { dup2(fdout, 1); }
             printf("environ: list all environment strings as name=value\n\r");
 	    printf("set <NAME> <VALUE>: set the environment variable <NAME> the value specified by <VALUE> and add to environment strings if this is a new variable\n\r");
 	    printf("list: list all the files in the current directory\n\r");
 	    printf("cd <directory>: change the currect directory to <directory>\n\r");
 	    printf("help: list the internal commands and how to use them\n\r");
 	    printf("quit: quit blazersh shell\n\r");
+	    closeIO(isInputRed, isOutputRed, fdin, fdout);
             break;
         case 6 :    //quit
             exit(0);
         default :   //not an internal command
             pid = fork();
 	    if (pid == 0) {
+                if (isInputRed == 1) { dup2(fdin, 0); }
+                if (isOutputRed == 1) { dup2(fdout, 1); }
 	        execvp(tokenizedCommand[0], tokenizedCommand);
 		printf("invalid command\n\r");
 		exit(0);
 	    } else if (pid > 0) {
 	        wait(NULL);
+		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
 	    }
 	    break;
