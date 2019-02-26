@@ -32,6 +32,7 @@ void readCommand(char* input) {
 }
 
 //tokenize command into individual tokens
+//tokens delimited by whitespace
 void tokenizeCommand(char* input, char** tokenizedCommand) {
     char *token;
     int i;
@@ -47,15 +48,47 @@ void tokenizeCommand(char* input, char** tokenizedCommand) {
     }
 }
 
+// detect IO redirection symbols < and > (which had been delimited by whitespace)
+// determine file names
+// truncates tokenizedCommand after arguments,  before IO redirect
+void detectIORedirect(char** tokenizedCommand, char** filenames) {
+    filenames[0] = NULL;
+    filenames[1] = NULL;
+    int i, indexIn = MAXTOK+1, indexOut = MAXTOK+1;
+
+    //look for < or > symbols and record filenames
+    for(i = 1; i < (MAXTOK-1); i++) {
+        if (tokenizedCommand[i] != NULL) {
+            if (strcmp(tokenizedCommand[i], "<") == 0) {
+                filenames[0] = tokenizedCommand[i+1];
+                indexIn = i;
+                i++; //don't test next token, this is file name
+            } else if (strcmp(tokenizedCommand[i], ">") == 0) {
+                filenames[1] = tokenizedCommand[i+1];
+                indexOut = i;
+                i++;
+            }
+        }
+    }
+
+    //truncate tokenizedCommand if IO redirect found
+    if (indexIn < MAXTOK) {                                //if input regardless of output
+        for(i = indexIn; i < MAXTOK; i++) {
+            tokenizedCommand[i] = NULL;
+        }
+    } else if (indexIn > MAXTOK && indexOut < MAXTOK) {    //if output but no input
+        for(i = indexOut; i < MAXTOK; i++) {
+            tokenizedCommand[i] = NULL;
+        }
+    }
+}
+
 // executes command
 // first looks for internal commands
-void executeCommand(char** tokenizedCommand) {
+void executeCommand(char** tokenizedCommand, char** filenames) {
     char* internalCommands[6];
-    int internalCommand = 0;
-    int i = 0;
-    int pid = 0;
-    char cwd[MAXPATH];
-    char arg[MAXPATH+4];
+    int internalCommand = 0, i = 0, pid = 0;
+    char cwd[MAXPATH], arg[MAXPATH+4];
 
     internalCommands[0] = "environ";
     internalCommands[1] = "set";
@@ -143,13 +176,15 @@ void executeCommand(char** tokenizedCommand) {
 }
 
 int main() {
-    char input[MAXCHAR];
-    char* tokenizedCommand[MAXTOK];
+    char input[MAXCHAR];             //raw user input
+    char* tokenizedCommand[MAXTOK];  //tokenized input delimited by whitespace
+    char* filenames[2];              //IO redirect filenames
     init();
     while (1 == 1) {
         readCommand(input);
         tokenizeCommand(input, tokenizedCommand);
-        executeCommand(tokenizedCommand);
+        detectIORedirect(tokenizedCommand, filenames);
+        executeCommand(tokenizedCommand, filenames);
     }
     return 0;
 }
