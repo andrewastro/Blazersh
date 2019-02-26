@@ -33,3 +33,7 @@ To run the test cases, the test programs must be compiled using gcc: e.g. `gcc -
 The test programs can then be executed from the blazersh shell: e.g. `./tests/testprog1`
 
 ## Sample test cases
+A test example of the internal command cd as well as environ with an argument.
+Notice at first pwd and the PWD environment variable are the same.
+After cd, pwd and the PWD environment variable change accordingly.
+![sample test of cd and environ](tests/images/cd.PNG "cd and environ")
