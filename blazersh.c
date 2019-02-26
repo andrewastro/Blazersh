@@ -98,7 +98,7 @@ void closeIO(int isInputRed, int isOutputRed, int fdin, int fdout) {
 // first looks for internal commands
 void executeCommand(char** tokenizedCommand, char** filenames) {
     char* internalCommands[6];
-    int internalCommand, i, pid, fdin, fdout, isInputRed = 0, isOutputRed = 0;
+    int internalCommand = 0, i = 0, pid, fdin, fdout, isInputRed = 0, isOutputRed = 0;
     char cwd[MAXPATH], arg[MAXPATH+4];
 
     internalCommands[0] = "environ";
