@@ -8,6 +8,7 @@
 
 #define MAXCHAR 1000    //max number of supported characters in command
 #define MAXTOK 100      //max number of tokens in command
+#define MAXPIPES 50     //max number of pipes
 #define MAXPATH 256     //max number of characters in path
 
 //display welcome message
@@ -94,9 +95,57 @@ void closeIO(int isInputRed, int isOutputRed, int fdin, int fdout) {
     }
 }
 
+//count number of pipes and record indices of pipe tokens
+int detectPipes(char** tokenizedCommand, int* pipeIndices) {
+    char* pipeToken = "|";
+    int numPipes = 0;
+    int i, j = 0;
+    for(i = 0; i < (MAXTOK-1); i++) {
+        if (tokenizedCommand[i] != NULL) {
+            if (strcmp(tokenizedCommand[i], pipeToken) == 0) {
+                numPipes++;
+                pipeIndices[j] = i;
+                j++;
+            }
+            if (tokenizedCommand[i+1] == NULL) {
+                pipeIndices[j] = i+1;
+            }
+        }
+    }
+    return numPipes;
+}
+
+//parse each piped command
+void findPipedCommands(int numPipes, int* pipeIndices, char* pipedCommands[MAXPIPES+1][MAXTOK], char** tokenizedCommand) {
+    char* pipeToken = "|";
+    int i, j, k = 0;
+
+    //reset
+    for (i = 0; i < (MAXPIPES+1); i++) {
+        for (j = 0; j < MAXTOK; j++) {
+            pipedCommands[i][j] = NULL;
+        }
+    }
+
+    //there is always one more command than pipes
+    j = 0;
+    for (i = 0; i < (numPipes+1); i++) {
+        for (; j < pipeIndices[i]; j++) {
+            pipedCommands[i][k] = tokenizedCommand[j];
+            k++;
+        }
+        j++;  //increment j to skip pipe token
+        k = 0;
+    }
+}
+
 // executes command
 // first looks for internal commands
-void executeCommand(char** tokenizedCommand, char** filenames) {
+// pipeRW: 0 for no piping, 1 for write to pipe, 2 for read from pipe, 3 for read and write to pipes
+// pipefd1: write pipe
+// pipefd2: read pipe
+int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int pipefd2[2]) {
+    static int pipefd1[2];
     char* internalCommands[6];
     int internalCommand = 0, i = 0, pid, fdin, fdout, isInputRed = 0, isOutputRed = 0;
     char cwd[MAXPATH], arg[MAXPATH+4];
@@ -125,6 +174,7 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
 	    isInputRed = 1;
 	}
     }
+    
     //open output file
     if (filenames[1] != NULL) {
 	if ((fdout = open(filenames[1], O_CREAT | O_WRONLY | O_TRUNC, 0666)) == -1) {
@@ -135,20 +185,69 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
 	}
     }
 
+    //open write pipe (pipefd1)
+    if ((pipeRW == 1) || (pipeRW == 3)) {
+        if (pipe(pipefd1) != 0) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+    }
+
     switch(internalCommand) {
         case 1 :    //environ
             pid = fork();
 	    if (pid == 0) {
 		if (isInputRed == 1) { dup2(fdin, 0); }
 		if (isOutputRed == 1) { dup2(fdout, 1); }
+                if (pipeRW == 1) {    //writing to a pipe only
+                    //close pipefd1[0] (read end)
+                    close(pipefd1[0]);
+                    //replace stdout with write end of pipefd1
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                } else if (pipeRW == 2) {   //reading from a pipe only
+                    //close pipefd2[1] (write end)
+                    close(pipefd2[1]);
+                    //replace stdin with read end of pipefd2
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                } else if (pipeRW == 3) {  //reading and writing to pipe
+                    //close read end of write pipe (pipefd1)
+                    close(pipefd1[0]);
+                    //close write end of read pipe (pipefd2)
+                    close(pipefd2[1]);
+                    //replace stdin and stdout
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                }
 	        execvp("printenv", tokenizedCommand);
 		exit(0);
 	    } else if (pid > 0) {
+                //close read pipe (pipefd2)
+                if((pipeRW == 2) || (pipeRW == 3)) {
+                    close(pipefd2[0]);
+                    close(pipefd2[1]);
+                }
 	        wait(NULL);
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
             }
 	    break;
+
         case 2 :    //set
             if (tokenizedCommand[2] == NULL) {
 	        printf("two arguments expected");
@@ -164,20 +263,62 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    }
             break;
+
         case 3 :    //list
             pid = fork();
 	    if (pid == 0) {
                 if (isInputRed == 1) { dup2(fdin, 0); }
 		if (isOutputRed == 1) { dup2(fdout, 1); }
+                if (pipeRW == 1) {    //writing to a pipe only
+                    //close pipefd1[0] (read end)
+                    close(pipefd1[0]);
+                    //replace stdout with write end of pipefd1
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                } else if (pipeRW == 2) {   //reading from a pipe only
+                    //close pipefd2[1] (write end)
+                    close(pipefd2[1]);
+                    //replace stdin with read end of pipefd2
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                } else if (pipeRW == 3) {  //reading and writing to pipe
+                    //close read end of write pipe (pipefd1)
+                    close(pipefd1[0]);
+                    //close write end of read pipe (pipefd2)
+                    close(pipefd2[1]);
+                    //replace stdin and stdout
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                }
 		execvp("ls", tokenizedCommand);
 		printf("list failed\n\r");
 		exit(0);
 	    } else if (pid > 0) {
+                //close read pipe (pipefd2)
+                if((pipeRW == 2) || (pipeRW == 3)) {
+                    close(pipefd2[0]);
+                    close(pipefd2[1]);
+                }
                 wait(NULL);
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
             } else {
 	    }
 	    break;
+
         case 4 :    //cd
 	    if (tokenizedCommand[1] == NULL) {
                 printf("argument expected\n\r");
@@ -194,6 +335,7 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
 		}
 	    }
 	    break;
+
         case 5 :    //help
             if (isInputRed == 1) { dup2(fdin, 0); }
             if (isOutputRed == 1) { dup2(fdout, 1); }
@@ -204,36 +346,124 @@ void executeCommand(char** tokenizedCommand, char** filenames) {
 	    printf("help: list the internal commands and how to use them\n\r");
 	    printf("quit: quit blazersh shell\n\r");
 	    closeIO(isInputRed, isOutputRed, fdin, fdout);
+            //close read pipe (pipefd2)
+            if((pipeRW == 2) || (pipeRW == 3)) {
+                close(pipefd2[0]);
+                close(pipefd2[1]);
+            }
             break;
+
         case 6 :    //quit
             exit(0);
+
         default :   //not an internal command
             pid = fork();
 	    if (pid == 0) {
                 if (isInputRed == 1) { dup2(fdin, 0); }
                 if (isOutputRed == 1) { dup2(fdout, 1); }
+                if (pipeRW == 1) {    //writing to a pipe only
+                    //close pipefd1[0] (read end)
+                    close(pipefd1[0]);
+                    //replace stdout with write end of pipefd1
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                } else if (pipeRW == 2) {   //reading from a pipe only
+                    //close pipefd2[1] (write end)
+                    close(pipefd2[1]);
+                    //replace stdin with read end of pipefd2
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                } else if (pipeRW == 3) {  //reading and writing to pipe
+                    //close read end of write pipe (pipefd1)
+                    close(pipefd1[0]);
+                    //close write end of read pipe (pipefd2)
+                    close(pipefd2[1]);
+                    //replace stdin and stdout
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                }
 	        execvp(tokenizedCommand[0], tokenizedCommand);
 		printf("invalid command\n\r");
 		exit(0);
 	    } else if (pid > 0) {
+                //close read pipe
+                if((pipeRW == 2) || (pipeRW == 3)) {
+                    close(pipefd2[0]);
+                    close(pipefd2[1]);
+                }
 	        wait(NULL);
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
 	    }
 	    break;
     }
+
+    //write pipe becomes next command's read pipe
+    return pipefd1;
 }
 
 int main() {
-    char input[MAXCHAR];             //raw user input
-    char* tokenizedCommand[MAXTOK];  //tokenized input delimited by whitespace
-    char* filenames[2];              //IO redirect filenames
+    char input[MAXCHAR];                      //raw user input
+    char* tokenizedCommand[MAXTOK];           //tokenized input delimited by whitespace
+    char* filenames[2];                       //IO redirect filenames
+    int pipeIndices[MAXPIPES];                //indices of the pipe tokens
+    int numPipes = 0;                         //number of pipes
+    char* pipedCommands[MAXPIPES+1][MAXTOK];  //array of each piped command
+    int pipefdRead[2];
+    
     init();
+    //execute commands on an infinite loop
     while (1 == 1) {
         readCommand(input);
         tokenizeCommand(input, tokenizedCommand);
         detectIORedirect(tokenizedCommand, filenames);
-        executeCommand(tokenizedCommand, filenames);
+        numPipes = detectPipes(tokenizedCommand, pipeIndices);
+
+        if (numPipes > 0) {
+            int i = 0;
+            char* noFiles[2];
+            int* returnfd;
+            noFiles[0] = NULL;
+            noFiles[1] = NULL;
+            
+            findPipedCommands(numPipes, pipeIndices, pipedCommands, tokenizedCommand);
+
+            //execute first command which only writes to a pipe
+            returnfd = executeCommand(pipedCommands[0], noFiles, 1, pipefdRead);
+            pipefdRead[0] = *returnfd;
+            pipefdRead[1] = *(returnfd+1);
+            
+            //execute middle commands which read and write from pipes
+            if (numPipes > 1) {
+                for (i = 1; i < numPipes; i++) {
+                    returnfd = executeCommand(pipedCommands[i], noFiles, 3, pipefdRead);
+                    pipefdRead[0] = *returnfd;
+                    pipefdRead[1] = *(returnfd+1);
+                }
+            }
+            
+            //execute final piped command which only reads from a pipe and can have output redirection
+            filenames[0] = NULL;
+            executeCommand(pipedCommands[numPipes], filenames, 2, pipefdRead);
+
+        } else {    //no piping, execute single command
+            executeCommand(tokenizedCommand, filenames, 0, pipefdRead);
+        }
     }
+
     return 0;
 }
