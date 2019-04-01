@@ -169,7 +169,7 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
     if (filenames[0] != NULL) {
         if ((fdin = open(filenames[0], O_RDONLY, 0666)) == -1) {
             printf("error opening file %s for input\n\r", filenames[0]);
-	    return;
+	    return pipefd1;
 	} else {
 	    isInputRed = 1;
 	}
@@ -179,7 +179,7 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
     if (filenames[1] != NULL) {
 	if ((fdout = open(filenames[1], O_CREAT | O_WRONLY | O_TRUNC, 0666)) == -1) {
 	     printf("error opening file %s for output\n\r", filenames[1]);
-	     return;
+	     return pipefd1;
 	} else {
 	    isOutputRed = 1;
 	}
