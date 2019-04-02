@@ -54,5 +54,9 @@ Next, forking background processes is demonstrated. Even piped commands can be r
 To demonstrate background processes, I piped the result of `list | wc -c`, which resulted in 848, to the _useless_ test program. With 848, _useless_ takes a few seconds to run which was enough time to show the result of running it in the foreground versus the background. As demonstrated, the PID of of _useless_ was 32176. Additionally, the `blazersh>` prompt was immediately given, as the parent did not wait on the child to execute. Children were executed as background processes using `setpgid(0,0)`.
 ![background test](images/background_test.PNG "background test")
 
+## Sample session
+Screenshot of a sample session:
+![sample session](images/sample_session.PNG "sample session")
+
 ## Contact information
 email: ayar434@uab.edu
