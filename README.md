@@ -33,7 +33,7 @@ All tests were successfully performed on the Vulcan server at moat.cis.uab.edu.
 
 Pipes are demonstrated first, as pipes are used in future test cases.
 
-blazersh should support up to 49 pipes. 49 is completely arbitrary and can easily be easily increased; it does _not_ represent a limitation of the code.
+blazersh should support up to 49 pipes. 49 is completely arbitrary and can easily be increased; it does _not_ represent a limitation of the code.
 
 Additionally, pipes _do_ support I/O redirection, outputting to a file.
 
