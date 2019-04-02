@@ -139,15 +139,31 @@ void findPipedCommands(int numPipes, int* pipeIndices, char* pipedCommands[MAXPI
     }
 }
 
+//detect commands that need to execute in the background
+//returns 1 if background process, 0 otherwise
+int detectBackgroundProc(char** command) {
+    char* backgroundToken = "&";
+    int index = 0;
+
+    //look at last token in command
+    while ((command[index] != NULL) && (index < MAXTOK)) { index++; }
+    if (strcmp(command[index-1], backgroundToken) == 0) {
+        command[index-1] = NULL;
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
 // executes command
 // first looks for internal commands
 // pipeRW: 0 for no piping, 1 for write to pipe, 2 for read from pipe, 3 for read and write to pipes
 // pipefd1: write pipe
 // pipefd2: read pipe
-int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int pipefd2[2]) {
+int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int pipefd2[2], int backgroundFlag) {
     static int pipefd1[2];
     char* internalCommands[6];
-    int internalCommand = 0, i = 0, pid, fdin, fdout, isInputRed = 0, isOutputRed = 0;
+    int internalCommand = 0, i = 0, pid, status, pgid, child = 0, fdin, fdout, isInputRed = 0, isOutputRed = 0;
     char cwd[MAXPATH], arg[MAXPATH+4];
 
     internalCommands[0] = "environ";
@@ -197,6 +213,7 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
         case 1 :    //environ
             pid = fork();
 	    if (pid == 0) {
+                if (backgroundFlag == 1) { child = setpgid(0, 0); }
 		if (isInputRed == 1) { dup2(fdin, 0); }
 		if (isOutputRed == 1) { dup2(fdout, 1); }
                 if (pipeRW == 1) {    //writing to a pipe only
@@ -241,8 +258,12 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
                 if((pipeRW == 2) || (pipeRW == 3)) {
                     close(pipefd2[0]);
                     close(pipefd2[1]);
+                } 
+	        if (backgroundFlag == 1) {
+                    waitpid(child, &status, WNOHANG);
+                } else {
+                    waitpid(0, &status, 0);
                 }
-	        wait(NULL);
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
             }
@@ -267,6 +288,7 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
         case 3 :    //list
             pid = fork();
 	    if (pid == 0) {
+                if (backgroundFlag == 1) { child = setpgid(0, 0); }
                 if (isInputRed == 1) { dup2(fdin, 0); }
 		if (isOutputRed == 1) { dup2(fdout, 1); }
                 if (pipeRW == 1) {    //writing to a pipe only
@@ -313,7 +335,11 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
                     close(pipefd2[0]);
                     close(pipefd2[1]);
                 }
-                wait(NULL);
+	        if (backgroundFlag == 1) {
+                    waitpid(child, &status, WNOHANG);
+                } else {
+                    waitpid(0, &status, 0);
+                }
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
             } else {
 	    }
@@ -359,6 +385,7 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
         default :   //not an internal command
             pid = fork();
 	    if (pid == 0) {
+                if (backgroundFlag == 1) { child = setpgid(0, 0); }
                 if (isInputRed == 1) { dup2(fdin, 0); }
                 if (isOutputRed == 1) { dup2(fdout, 1); }
                 if (pipeRW == 1) {    //writing to a pipe only
@@ -405,7 +432,11 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
                     close(pipefd2[0]);
                     close(pipefd2[1]);
                 }
-	        wait(NULL);
+	        if (backgroundFlag == 1) {
+                    waitpid(child, &status, WNOHANG);
+                } else {
+                    waitpid(0, &status, 0);
+                }
 		closeIO(isInputRed, isOutputRed, fdin, fdout);
 	    } else {
 	    }
@@ -423,7 +454,7 @@ int main() {
     int pipeIndices[MAXPIPES];                //indices of the pipe tokens
     int numPipes = 0;                         //number of pipes
     char* pipedCommands[MAXPIPES+1][MAXTOK];  //array of each piped command
-    int pipefdRead[2];
+    int pipefdRead[2];                        //read pipe addresses
     
     init();
     //execute commands on an infinite loop
@@ -432,25 +463,30 @@ int main() {
         tokenizeCommand(input, tokenizedCommand);
         detectIORedirect(tokenizedCommand, filenames);
         numPipes = detectPipes(tokenizedCommand, pipeIndices);
-
+        findPipedCommands(numPipes, pipeIndices, pipedCommands, tokenizedCommand);
+        
+        //detect which processes need to execute in the background
+        int i, backgroundFlag[MAXPIPES+1];
+        for (i = 0; i < (numPipes+1); i++) {
+            backgroundFlag[i] = detectBackgroundProc(pipedCommands[i]);
+        }
+        
         if (numPipes > 0) {
-            int i = 0;
+            i = 0;
             char* noFiles[2];
             int* returnfd;
             noFiles[0] = NULL;
             noFiles[1] = NULL;
-            
-            findPipedCommands(numPipes, pipeIndices, pipedCommands, tokenizedCommand);
 
             //execute first command which only writes to a pipe
-            returnfd = executeCommand(pipedCommands[0], noFiles, 1, pipefdRead);
+            returnfd = executeCommand(pipedCommands[0], noFiles, 1, pipefdRead, backgroundFlag[0]);
             pipefdRead[0] = *returnfd;
             pipefdRead[1] = *(returnfd+1);
             
             //execute middle commands which read and write from pipes
             if (numPipes > 1) {
                 for (i = 1; i < numPipes; i++) {
-                    returnfd = executeCommand(pipedCommands[i], noFiles, 3, pipefdRead);
+                    returnfd = executeCommand(pipedCommands[i], noFiles, 3, pipefdRead, backgroundFlag[i]);
                     pipefdRead[0] = *returnfd;
                     pipefdRead[1] = *(returnfd+1);
                 }
@@ -458,10 +494,10 @@ int main() {
             
             //execute final piped command which only reads from a pipe and can have output redirection
             filenames[0] = NULL;
-            executeCommand(pipedCommands[numPipes], filenames, 2, pipefdRead);
+            executeCommand(pipedCommands[numPipes], filenames, 2, pipefdRead, backgroundFlag[numPipes]);
 
         } else {    //no piping, execute single command
-            executeCommand(tokenizedCommand, filenames, 0, pipefdRead);
+            executeCommand(pipedCommands[0], filenames, 0, pipefdRead, backgroundFlag[0]);
         }
     }
 
