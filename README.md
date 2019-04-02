@@ -1,7 +1,7 @@
 # blazersh
 
 ## Description
-blazersh is a simple shell interface that executes commands by creating processes and supports I/O redirection.
+blazersh is a simple shell interface that executes commands by creating processes. The shell supports I/O redirection, pipes, and forking background processes.
 
 ## Author
 Andrew Yarbrough
@@ -10,66 +10,49 @@ Andrew Yarbrough
 ### Prerequisites and dependencies
 gcc
 ### How to build
-Execute the Makefile with the `make` command to compile the program. The blazersh shell is currently one file.
+Execute the Makefile with the `make` command to compile the program. The blazersh shell is one file.
 ### How to run
 The Makefile creates an executable file *blazersh* that can be executed by `./blazersh`.
 
 ## Testing
-Two test programs are included: testprog1 and testprog2.
+Pipes, I/O redirection, and background processes were tested using commands such as `list`, `sort`, and `wc`.
 
-testprog1 simply prints to standard output:
-> Hello World!
+Additionally, one test program was included: *useless.c*
 
-testprog2 is a simple 2-function calculator that accepts one command line argument, either *add* or *sub*, and two integers from standard input.
-If the command line argument was *add*, testprog2 adds the two integers from standard input.
-Likewise, if the argument was *sub*, testprog2 subtracts the two integers from standard input.
-The result of the addition or subtraction is printed to standard output.
+useless takes a single value from standard input and performs the value cubed number of bitshifts. The purpose of useless was to have a program that runs a significant amount of time so that the difference in running it in the foreground and in the background could be observed.
 
 Additional tests were performed of the blazersh shell internal commands.
 
 ## How to run test programs
-To run the test cases, the test programs must be compiled using gcc: e.g. `gcc -o testprog1 testprog1.c`
+To run the test cases, the test programs must be compiled using gcc: e.g. `gcc -o useless useless.c`
 
-The test programs can then be executed from the blazersh shell: e.g. `./tests/testprog1`
+The test programs can then be executed from the blazersh shell: e.g. `list | wc -c | ./useless`
 
 ## Sample test cases
-The initialization of the blazersh shell and demonstration of how user is re-prompted when no input is given.
+All tests were successfully performed on the Vulcan server at moat.cis.uab.edu.
 
-![blazersh prompt](tests/images/prompt.PNG "prompt")
+Pipes are demonstrated first, as pipes are used in future test cases.
 
-A test example of the internal command `cd` as well as `environ` with an argument.
-Notice at first the *pwd* and the PWD environment variable are the same.
-After `cd`, the *pwd* and the PWD environment variable change accordingly.
+blazersh should support up to 49 pipes. 49 is completely arbitrary and can easily be easily increased; it does _not_ represent a limitation of the code.
 
-![sample test of cd and environ](tests/images/cd.PNG "cd and environ")
+Additionally, pipes _do_ support I/O redirection, outputting to a file.
 
-A test example of the internal command `set`. The environment variable *FOOBAR* did not exist.
-`set` created the environment variable and set it to the passed argument *hello* as demonstrated by the `environ` command.
+First, a demonstration of a single pipe:
+![single pipe](images/single_pipe.PNG "single pipe")
 
-![sample test of set and environ](tests/images/set.PNG "set and environ")
+Second, a demonstration of two pipes:
+![two pipes](images/two_pipes.PNG "two pipes")
 
-A test example of the internal command `help`.
+Third, a demonstration of four pipes:
+![four pipes](images/four_pipes.PNG "four pipes")
 
-![sample test of help](tests/images/help.PNG "help")
+Finally, a demonstration of I/O redirection:
+![I/O redirection](images/io_redirection.PNG "I/O redirection")
 
-A test example of the internal command `list`.
+Next, forking background processes is demonstrated. Even piped commands can be run in the background. This test also demonstrates the use of the `jobs` command, listing the processes.
 
-![sample test of list](tests/images/list.PNG "list")
-
-A test example of running an external command, *testprog1*, which prints to standard output.
-
-![sample test of external command](tests/images/testprog1.PNG "external command")
-
-A test example of running a command with I/O redirection. In this example, testprog2 is accepting an argument *sub*,
-an input file *testprog1input.txt*, and an output file *test.txt*. The contents of *testprog1input.txt* (found in the tests directory):
-> 5
-
-> 4
-
-The contents of the resulting *test.txt* file:
-> 1
-
-![sample test of I/O redirection](tests/images/testprog2io.PNG "I/O redirection")
+To demonstrate background processes, I piped the result of `list | wc -c`, which resulted in 848, to the _useless_ test program. With 848, _useless_ takes a few seconds to run which was enough time to show the result of running it in the foreground versus the background. As demonstrated, the PID of of _useless_ was 32176. Additionally, the `blazersh>` prompt was immediately given, as the parent did not wait on the child to execute. Children were executed as background processes using `setpgid(0,0)`.
+![background test](images/background_test.PNG "background test")
 
 ## Contact information
 email: ayar434@uab.edu
