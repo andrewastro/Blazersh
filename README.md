@@ -62,7 +62,7 @@ To demonstrate background processes, I piped the result of `list | wc -c`, which
 ## Sample session
 Screenshot of a sample session:
 
-![sample session](images/sample_session.PNG "sample session")
+![sample session](images/sample_session.png "sample session")
 
 ## Contact information
 email: ayar434@uab.edu
