@@ -162,7 +162,7 @@ int detectBackgroundProc(char** command) {
 // pipefd2: read pipe
 int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int pipefd2[2], int backgroundFlag) {
     static int pipefd1[2];
-    char* internalCommands[6];
+    char* internalCommands[7];
     int internalCommand = 0, i = 0, pid, status, pgid, child = 0, fdin, fdout, isInputRed = 0, isOutputRed = 0;
     char cwd[MAXPATH], arg[MAXPATH+4];
 
@@ -172,9 +172,10 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
     internalCommands[3] = "cd";
     internalCommands[4] = "help";
     internalCommands[5] = "quit";
+    internalCommands[6] = "jobs";
     
     //look for internal commands
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 7; i++) {
         if (strcmp(tokenizedCommand[0], internalCommands[i]) == 0) {
             internalCommand = i + 1;
 	    break;
@@ -381,6 +382,72 @@ int* executeCommand(char** tokenizedCommand, char** filenames, int pipeRW, int p
 
         case 6 :    //quit
             exit(0);
+
+	case 7 :    //jobs
+            pid = fork();
+	    if (pid == 0) {
+                if (backgroundFlag == 1) { child = setpgid(0, 0); }
+                if (isInputRed == 1) { dup2(fdin, 0); }
+		if (isOutputRed == 1) { dup2(fdout, 1); }
+                if (pipeRW == 1) {    //writing to a pipe only
+                    //close pipefd1[0] (read end)
+                    close(pipefd1[0]);
+                    //replace stdout with write end of pipefd1
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                } else if (pipeRW == 2) {   //reading from a pipe only
+                    //close pipefd2[1] (write end)
+                    close(pipefd2[1]);
+                    //replace stdin with read end of pipefd2
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                } else if (pipeRW == 3) {  //reading and writing to pipe
+                    //close read end of write pipe (pipefd1)
+                    close(pipefd1[0]);
+                    //close write end of read pipe (pipefd2)
+                    close(pipefd2[1]);
+                    //replace stdin and stdout
+                    if (dup2(pipefd1[1], 1) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd1[1]);
+                    if (dup2(pipefd2[0], 0) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd2[0]);
+                }
+		tokenizedCommand[1] = "-o";
+		tokenizedCommand[2] = "pid";
+		tokenizedCommand[3] = "-o";
+		tokenizedCommand[4] = "cmd=NAME";
+		tokenizedCommand[5] = NULL;
+		execvp("ps", tokenizedCommand);
+		printf("jobs failed\n\r");
+		exit(0);
+	    } else if (pid > 0) {
+                //close read pipe (pipefd2)
+                if((pipeRW == 2) || (pipeRW == 3)) {
+                    close(pipefd2[0]);
+                    close(pipefd2[1]);
+                }
+	        if (backgroundFlag == 1) {
+                    waitpid(child, &status, WNOHANG);
+                } else {
+                    waitpid(0, &status, 0);
+                }
+		closeIO(isInputRed, isOutputRed, fdin, fdout);
+            } else {
+	    }
+	    break;
+
 
         default :   //not an internal command
             pid = fork();
